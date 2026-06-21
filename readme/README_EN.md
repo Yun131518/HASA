@@ -6,7 +6,7 @@
 
 ![Java](https://img.shields.io/badge/Java-17%2B-orange?style=for-the-badge&logo=openjdk)
 ![Curve](https://img.shields.io/badge/Curve-secp256k1-blue?style=for-the-badge)
-![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
+![License](https://img.shields.io/badge/License-AGPL%20v3.0-blue?style=for-the-badge)
 ![BouncyCastle](https://img.shields.io/badge/BouncyCastle-1.84-purple?style=for-the-badge)
 
 [한국어](README_KO.md) | **English**
@@ -222,4 +222,4 @@ Claude helped design the CLI architecture, debug JAR packaging issues, and write
 
 ## 📄 License
 
-MIT — see [LICENSE](../LICENSE).
+GNU AGPL v3.0 — see [LICENSE](../LICENSE).

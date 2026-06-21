@@ -6,7 +6,7 @@
 
 ![Java](https://img.shields.io/badge/Java-17%2B-orange?style=for-the-badge&logo=openjdk)
 ![Curve](https://img.shields.io/badge/Curve-secp256k1-blue?style=for-the-badge)
-![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
+![License](https://img.shields.io/badge/License-AGPL%20v3.0-blue?style=for-the-badge)
 ![BouncyCastle](https://img.shields.io/badge/BouncyCastle-1.84-purple?style=for-the-badge)
 
 **한국어** | [English](README_EN.md)
@@ -223,4 +223,4 @@ CLI 구조 설계, JAR 패키징 디버깅, 문서 작성 등에 Claude가 함�
 
 ## 📄 라이선스
 
-MIT — [LICENSE](../LICENSE) 참고.
+GNU AGPL v3.0 — [LICENSE](../LICENSE) 참고.
