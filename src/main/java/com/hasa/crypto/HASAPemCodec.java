@@ -32,7 +32,12 @@ public class HASAPemCodec {
     // 3. PEM 문자열 -> 공개키(Q) 복원
     public static ECPoint decodePublicKey(String pem) throws Exception {
         String base64 = pem.replace(BEGIN_PUB, "").replace(END_PUB, "").replaceAll("\\s+", "");
-        return HASA.domain.getCurve().decodePoint(Base64.decode(base64)).normalize();
+        byte[] raw = Base64.decode(base64);
+        if (raw.length != 33) {
+            throw new IllegalArgumentException(
+                "공개키 데이터 길이 오류: " + raw.length + " 바이트 (33 바이트 필요)");
+        }
+        return HASA.domain.getCurve().decodePoint(raw).normalize();
     }
 
     // 4. PEM 문자열 -> 서명(R, s) 복원

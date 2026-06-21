@@ -79,7 +79,7 @@
         </dependency>
     </dependencies>
 
-    <!-- 퍼징 프로파일: mvn test -Pfuzz 로 Jazzer 퍼징 활성화 -->
+    <!-- 퍼징 프로파일: mvn test -Pfuzz 로 Jazzer coverage-guided 퍼징 활성화 -->
     <profiles>
         <profile>
             <id>fuzz</id>
@@ -93,14 +93,37 @@
             </dependencies>
             <build>
                 <plugins>
+                    <!-- src/fuzz/java 와 src/test/java 모두 테스트 소스로 추가 -->
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>build-helper-maven-plugin</artifactId>
+                        <version>3.5.0</version>
+                        <executions>
+                            <execution>
+                                <id>add-fuzz-test-sources</id>
+                                <phase>generate-test-sources</phase>
+                                <goals><goal>add-test-source</goal></goals>
+                                <configuration>
+                                    <sources>
+                                        <source>src/fuzz/java</source>
+                                    </sources>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-surefire-plugin</artifactId>
                         <version>3.2.5</version>
                         <configuration>
+                            <!-- Jazzer @FuzzTest 타겟만 실행 -->
                             <includes>
-                                <include>**/*FuzzTargets.java</include>
+                                <include>**/JazzerTargets.java</include>
                             </includes>
+                            <!-- 기본 runs: 10만회 (조정: -Djazzer.runs=N) -->
+                            <systemPropertyVariables>
+                                <jazzer.runs>100000</jazzer.runs>
+                            </systemPropertyVariables>
                         </configuration>
                     </plugin>
                 </plugins>
