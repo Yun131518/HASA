@@ -7,8 +7,9 @@ import org.bouncycastle.crypto.params.ECDomainParameters;
 import org.bouncycastle.math.ec.ECPoint;
 import org.bouncycastle.util.BigIntegers;
 
-import java.security.*;
 import java.math.BigInteger;
+import java.nio.charset.StandardCharsets;
+import java.security.*;
 
 public class HASA {
 
@@ -32,9 +33,13 @@ public class HASA {
         return md.digest();
     }
 
+    // BIP340 스타일 tagged hash: SHA256(SHA256(tag) || SHA256(tag) || inputs...)
+    // 태그별 도메인을 완전히 분리하여 교차 태그 충돌을 방지한다.
     public static byte[] tagHash(String tag, byte[]... inputs) throws Exception {
+        byte[] tagDigest = hash(tag.getBytes(StandardCharsets.UTF_8));
         MessageDigest md = MessageDigest.getInstance("SHA-256");
-        md.update(tag.getBytes());
+        md.update(tagDigest);
+        md.update(tagDigest);
         for (byte[] i : inputs) md.update(i);
         return md.digest();
     }
@@ -50,22 +55,38 @@ public class HASA {
 
     // ===== KEYPAIR =====
     public static class KeyPair {
-        public BigInteger d;
-        public ECPoint Q;
-        
-        public KeyPair(BigInteger d, ECPoint Q) { this.d = d; this.Q = Q; }
+        private final BigInteger d;
+        public final ECPoint Q;
+
+        public KeyPair(BigInteger d, ECPoint Q) {
+            this.d = d;
+            this.Q = Q;
+        }
+
+        // 같은 패키지 내 서명 연산에만 접근 허용
+        BigInteger privateKey() { return d; }
     }
 
+    // rejection sampling으로 편향 없는 키 생성
     public static KeyPair genKey() {
-        BigInteger d = new BigInteger(n.bitLength(), random).mod(n);
+        BigInteger d;
+        do {
+            d = new BigInteger(256, random);
+        } while (d.compareTo(BigInteger.ONE) < 0 || d.compareTo(n) >= 0);
         ECPoint Q = G.multiply(d).normalize();
         return new KeyPair(d, Q);
     }
 
-    // ===== NONCE (deterministic-style) =====
+    // ===== NONCE (결정론적 + rejection sampling) =====
+    // counter를 포함해 k >= n 인 극히 드문 경우(확률 ~2^-128)에도 안전하게 재시도한다.
     public static BigInteger nonce(BigInteger d, byte[] msg) throws Exception {
-        byte[] h = tagHash("NONCE-V1", enc(d), msg);
-        return new BigInteger(1, h).mod(n);
+        for (int counter = 0; ; counter++) {
+            byte[] h = tagHash("NONCE-V1", enc(d), msg, new byte[]{(byte) counter});
+            BigInteger k = new BigInteger(1, h);
+            if (k.compareTo(BigInteger.ONE) >= 0 && k.compareTo(n) < 0) {
+                return k;
+            }
+        }
     }
 
     // ===== CHALLENGE =====
@@ -74,30 +95,37 @@ public class HASA {
         return new BigInteger(1, e).mod(n);
     }
 
-    // ===== SINGLE SIGN =====
+    // ===== SIGNATURE =====
     public static class Signature {
-        public ECPoint R;
-        public BigInteger s;
-        
-        public Signature() {}
-        public Signature(ECPoint R, BigInteger s) { this.R = R; this.s = s; }
+        public final ECPoint R;
+        public final BigInteger s;
+
+        public Signature(ECPoint R, BigInteger s) {
+            this.R = R;
+            this.s = s;
+        }
     }
 
     public static Signature sign(byte[] msg, KeyPair kp) throws Exception {
-        BigInteger k = nonce(kp.d, msg);
+        BigInteger k = nonce(kp.privateKey(), msg);
         ECPoint R = G.multiply(k).normalize();
 
         BigInteger e = challenge(R, kp.Q, msg);
-        BigInteger s = k.add(e.multiply(kp.d)).mod(n);
+        BigInteger s = k.add(e.multiply(kp.privateKey())).mod(n);
 
         return new Signature(R, s);
     }
 
     // ===== VERIFY =====
     public static boolean verify(byte[] msg, ECPoint R, BigInteger s, ECPoint Q) throws Exception {
+        // 입력값 범위 검사: 잘못된 값으로 인한 위조 서명 허용 방지
+        if (R == null || R.isInfinity()) return false;
+        if (Q == null || Q.isInfinity()) return false;
+        if (s == null || s.compareTo(BigInteger.ONE) < 0 || s.compareTo(n) >= 0) return false;
+
         BigInteger e = challenge(R, Q, msg);
 
-        ECPoint left = G.multiply(s).normalize();
+        ECPoint left  = G.multiply(s).normalize();
         ECPoint right = R.add(Q.multiply(e)).normalize();
 
         return left.equals(right);

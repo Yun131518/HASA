@@ -76,7 +76,7 @@ public class Main {
 
             HASA.KeyPair kp = HASA.genKey();
             String pubPem   = HASAPemCodec.encodePublicKey(kp.Q);
-            String privPem  = encodePrivateKey(kp.d);
+            String privPem  = encodePrivateKey(kp.privateKey());
 
             if (!name.isEmpty()) {
                 Files.writeString(Path.of(name + ".pub"),  pubPem,  StandardCharsets.UTF_8);
