@@ -1,0 +1,8 @@
+# 컴파일 산출물
+bin/
+
+# IDE
+.vscode/
+
+# 구버전 JAR (Java 21 빌드, 현재 환경 미지원)
+HASA.jar
