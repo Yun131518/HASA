@@ -40,9 +40,14 @@ public class HASAPemCodec {
         String base64 = pem.replace(BEGIN_SIG, "").replace(END_SIG, "").replaceAll("\\s+", "");
         byte[] combined = Base64.decode(base64);
 
+        if (combined.length != 65) {
+            throw new IllegalArgumentException(
+                "서명 데이터 길이 오류: " + combined.length + " 바이트 (65 바이트 필요)");
+        }
+
         byte[] rawR = new byte[33];
         byte[] rawS = new byte[32];
-        System.arraycopy(combined, 0, rawR, 0, 33);
+        System.arraycopy(combined, 0,  rawR, 0, 33);
         System.arraycopy(combined, 33, rawS, 0, 32);
 
         ECPoint r = HASA.domain.getCurve().decodePoint(rawR).normalize();

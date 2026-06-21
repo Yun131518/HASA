@@ -27,6 +27,8 @@ public class HASA {
     private static final SecureRandom random = new SecureRandom();
 
     // ===== HASH =====
+    // 주의: 가변 길이 복수 입력에 사용하면 연결 모호성이 생긴다.
+    // 내부 호출은 반드시 고정 크기 입력(enc 결과 등)만 사용할 것.
     public static byte[] hash(byte[]... inputs) throws Exception {
         MessageDigest md = MessageDigest.getInstance("SHA-256");
         for (byte[] i : inputs) md.update(i);
@@ -77,11 +79,18 @@ public class HASA {
         return new KeyPair(d, Q);
     }
 
-    // ===== NONCE (결정론적 + rejection sampling) =====
-    // counter를 포함해 k >= n 인 극히 드문 경우(확률 ~2^-128)에도 안전하게 재시도한다.
+    // ===== NONCE =====
+    // attempt: sign()의 외부 재시도 카운터 (e=0 또는 s=0인 경우 사용)
+    // counter:  k >= n 인 극히 드문 경우의 내부 rejection 카운터
+    // 두 카운터 모두 int → 4바이트 big-endian으로 인코딩하여 byte 오버플로 방지
     public static BigInteger nonce(BigInteger d, byte[] msg) throws Exception {
+        return nonceInternal(d, msg, 0);
+    }
+
+    static BigInteger nonceInternal(BigInteger d, byte[] msg, int attempt) throws Exception {
+        byte[] attemptBytes = intToBytes(attempt);
         for (int counter = 0; ; counter++) {
-            byte[] h = tagHash("NONCE-V1", enc(d), msg, new byte[]{(byte) counter});
+            byte[] h = tagHash("NONCE-V1", enc(d), msg, attemptBytes, intToBytes(counter));
             BigInteger k = new BigInteger(1, h);
             if (k.compareTo(BigInteger.ONE) >= 0 && k.compareTo(n) < 0) {
                 return k;
@@ -89,10 +98,18 @@ public class HASA {
         }
     }
 
+    private static byte[] intToBytes(int v) {
+        return new byte[]{(byte)(v >> 24), (byte)(v >> 16), (byte)(v >> 8), (byte)v};
+    }
+
     // ===== CHALLENGE =====
+    // e=0이면 sign()에서 s = k가 되어 논스가 직접 노출된다.
+    // 발생 확률 ~2^-256이지만 0은 1로 대체한다.
+    // 서명자와 검증자 모두 동일한 규칙을 적용하므로 일관성이 유지된다.
     public static BigInteger challenge(ECPoint R, ECPoint Q, byte[] msg) throws Exception {
         byte[] e = tagHash("CHALLENGE-V1", enc(R), enc(Q), hash(msg));
-        return new BigInteger(1, e).mod(n);
+        BigInteger c = new BigInteger(1, e).mod(n);
+        return c.equals(BigInteger.ZERO) ? BigInteger.ONE : c;
     }
 
     // ===== SIGNATURE =====
@@ -107,13 +124,24 @@ public class HASA {
     }
 
     public static Signature sign(byte[] msg, KeyPair kp) throws Exception {
-        BigInteger k = nonce(kp.privateKey(), msg);
-        ECPoint R = G.multiply(k).normalize();
+        for (int attempt = 0; ; attempt++) {
+            BigInteger k = nonceInternal(kp.privateKey(), msg, attempt);
+            ECPoint R = G.multiply(k).normalize();
 
-        BigInteger e = challenge(R, kp.Q, msg);
-        BigInteger s = k.add(e.multiply(kp.privateKey())).mod(n);
+            BigInteger e = challenge(R, kp.Q, msg);
+            if (e.equals(BigInteger.ZERO)) continue; // challenge()가 방어하지만 재확인
 
-        return new Signature(R, s);
+            // 타이밍 사이드채널 완화: 랜덤 r을 이용한 스칼라 블라인딩
+            // d_blind = d + r*n 이므로 e*d_blind mod n = e*d mod n (r*n ≡ 0 mod n)
+            // r이 매 서명마다 달라져 BigInteger.multiply()의 타이밍 상관관계 분석을 어렵게 한다.
+            BigInteger r       = new BigInteger(64, random);
+            BigInteger d_blind = kp.privateKey().add(r.multiply(n));
+            BigInteger s       = k.add(e.multiply(d_blind)).mod(n);
+
+            if (s.equals(BigInteger.ZERO)) continue; // s=0이면 검증 실패, 재시도
+
+            return new Signature(R, s);
+        }
     }
 
     // ===== VERIFY =====

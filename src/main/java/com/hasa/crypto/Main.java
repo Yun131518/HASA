@@ -8,6 +8,7 @@ import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.Scanner;
 
@@ -221,16 +222,25 @@ public class Main {
 
     static String encodePrivateKey(BigInteger d) {
         byte[] raw = BigIntegers.asUnsignedByteArray(32, d);
-        String b64 = Base64.toBase64String(raw);
-        StringBuilder sb = new StringBuilder(BEGIN_PRIV);
-        for (int i = 0; i < b64.length(); i += 64)
-            sb.append(b64, i, Math.min(i + 64, b64.length())).append('\n');
-        sb.append(END_PRIV);
-        return sb.toString();
+        try {
+            String b64 = Base64.toBase64String(raw);
+            StringBuilder sb = new StringBuilder(BEGIN_PRIV);
+            for (int i = 0; i < b64.length(); i += 64)
+                sb.append(b64, i, Math.min(i + 64, b64.length())).append('\n');
+            sb.append(END_PRIV);
+            return sb.toString();
+        } finally {
+            Arrays.fill(raw, (byte) 0); // 비밀키 바이트 즉시 제로화
+        }
     }
 
     static BigInteger decodePrivateKey(String pem) {
         String b64 = pem.replace(BEGIN_PRIV, "").replace(END_PRIV, "").replaceAll("\\s+", "");
-        return new BigInteger(1, Base64.decode(b64));
+        byte[] raw = Base64.decode(b64);
+        try {
+            return new BigInteger(1, raw);
+        } finally {
+            Arrays.fill(raw, (byte) 0); // Base64 디코딩 결과 바이트 즉시 제로화
+        }
     }
 }
