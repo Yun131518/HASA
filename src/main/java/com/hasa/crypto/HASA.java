@@ -1,8 +1,8 @@
 package com.hasa.crypto;
 
+import org.bouncycastle.asn1.x9.X9ECParameters;
+import org.bouncycastle.crypto.ec.CustomNamedCurves;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
-import org.bouncycastle.jce.spec.ECParameterSpec;
-import org.bouncycastle.jce.ECNamedCurveTable;
 import org.bouncycastle.crypto.params.ECDomainParameters;
 import org.bouncycastle.math.ec.ECPoint;
 import org.bouncycastle.util.BigIntegers;
@@ -10,6 +10,7 @@ import org.bouncycastle.util.BigIntegers;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.security.*;
+import java.util.Arrays;
 
 public class HASA {
 
@@ -20,10 +21,15 @@ public class HASA {
     }
 
     // ===== CURVE =====
-    public static final ECParameterSpec params = ECNamedCurveTable.getParameterSpec("secp256k1");
-    public static final ECDomainParameters domain = new ECDomainParameters(params.getCurve(), params.getG(), params.getN());
-    public static final ECPoint G = domain.getG();
-    public static final BigInteger n = domain.getN();
+    // CustomNamedCurves 사용 이유:
+    //   ECNamedCurveTable 의 제네릭 구현 대신, secp256k1 전용 GLV(Gallant-Lambert-Vanstone)
+    //   엔도모피즘을 활성화한다. GLV는 256비트 스칼라를 두 개의 ~128비트 스칼라로 분해하여
+    //   EC 포인트 곱셈 시 타이밍 노출을 256비트 → ~128비트로 절반 감소시킨다.
+    private static final X9ECParameters  CURVE_X9 = CustomNamedCurves.getByName("secp256k1");
+    public  static final ECDomainParameters domain  = new ECDomainParameters(
+            CURVE_X9.getCurve(), CURVE_X9.getG(), CURVE_X9.getN(), CURVE_X9.getH());
+    public  static final ECPoint    G      = domain.getG();
+    public  static final BigInteger n      = domain.getN();
     private static final SecureRandom random = new SecureRandom();
 
     // ===== HASH =====
@@ -124,21 +130,58 @@ public class HASA {
     }
 
     public static Signature sign(byte[] msg, KeyPair kp) throws Exception {
+        return NativeSecp256k1.AVAILABLE ? signNative(msg, kp) : signJava(msg, kp);
+    }
+
+    // ── 상수시간 경로: libsecp256k1 (NativeSecp256k1.AVAILABLE == true 일 때) ──
+    // G*k, e*d mod n, k + e*d mod n 전부 C 레벨 CMOV로 상수시간 보장
+    private static Signature signNative(byte[] msg, KeyPair kp) throws Exception {
+        for (int attempt = 0; ; attempt++) {
+            BigInteger k   = nonceInternal(kp.privateKey(), msg, attempt);
+            byte[]     kb  = enc(k);              // 32바이트 big-endian
+            byte[]     db  = enc(kp.privateKey());// 비밀키 바이트 (사용 후 제로화)
+            try {
+                // 1. R = G * k (상수시간)
+                byte[]  Rb = NativeSecp256k1.pubkeyCreate(kb);
+                ECPoint R  = domain.getCurve().decodePoint(Rb).normalize();
+
+                BigInteger e = challenge(R, kp.Q, msg);
+                if (e.equals(BigInteger.ZERO)) continue;
+
+                byte[] eb = enc(e);
+
+                // 2. ed = e * d mod n (상수시간)
+                byte[] ed = NativeSecp256k1.scalarMul(db, eb);
+                // 3. s  = k + ed mod n (상수시간)
+                byte[] sb = NativeSecp256k1.scalarAdd(ed, kb);
+                Arrays.fill(ed, (byte) 0);
+
+                BigInteger s = new BigInteger(1, sb);
+                if (s.equals(BigInteger.ZERO)) continue;
+
+                return new Signature(R, s);
+            } finally {
+                Arrays.fill(db, (byte) 0); // 비밀키 바이트 즉시 제로화
+            }
+        }
+    }
+
+    // ── Java 폴백: 스칼라 블라인딩으로 타이밍 완화 (libsecp256k1 없을 때) ──
+    // BigInteger.multiply() 는 비상수시간이지만 r*n 블라인딩으로 상관관계 분석을 어렵게 함
+    private static Signature signJava(byte[] msg, KeyPair kp) throws Exception {
         for (int attempt = 0; ; attempt++) {
             BigInteger k = nonceInternal(kp.privateKey(), msg, attempt);
-            ECPoint R = G.multiply(k).normalize();
+            ECPoint R    = G.multiply(k).normalize();
 
             BigInteger e = challenge(R, kp.Q, msg);
-            if (e.equals(BigInteger.ZERO)) continue; // challenge()가 방어하지만 재확인
+            if (e.equals(BigInteger.ZERO)) continue;
 
-            // 타이밍 사이드채널 완화: 랜덤 r을 이용한 스칼라 블라인딩
-            // d_blind = d + r*n 이므로 e*d_blind mod n = e*d mod n (r*n ≡ 0 mod n)
-            // r이 매 서명마다 달라져 BigInteger.multiply()의 타이밍 상관관계 분석을 어렵게 한다.
+            // 스칼라 블라인딩: d_blind = d + r*n → e*d_blind mod n = e*d mod n
             BigInteger r       = new BigInteger(64, random);
             BigInteger d_blind = kp.privateKey().add(r.multiply(n));
             BigInteger s       = k.add(e.multiply(d_blind)).mod(n);
 
-            if (s.equals(BigInteger.ZERO)) continue; // s=0이면 검증 실패, 재시도
+            if (s.equals(BigInteger.ZERO)) continue;
 
             return new Signature(R, s);
         }
