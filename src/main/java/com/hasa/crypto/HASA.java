@@ -7,6 +7,9 @@ import org.bouncycastle.crypto.params.ECDomainParameters;
 import org.bouncycastle.math.ec.ECPoint;
 import org.bouncycastle.util.BigIntegers;
 
+import javax.crypto.Cipher;
+import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.security.*;
@@ -184,6 +187,84 @@ public class HASA {
             if (s.equals(BigInteger.ZERO)) continue;
 
             return new Signature(R, s);
+        }
+    }
+
+    // ===== ENCRYPTION (HASA-ECIES) =====
+    // 방식: ECDH 키 교환 + AES-256-GCM 대칭 암호화
+    // 와이어 포맷: R(33) | GCM nonce(12) | ciphertext+tag(N+16)
+    // 최소 암호문 길이: 61바이트 (플레인텍스트 0바이트일 때)
+    //
+    // 보안 근거:
+    //   - ECDH 공유 비밀 = S.x (X9.63 표준)
+    //   - KDF = tagHash("HASA-ECIES-ENC-V1", S.x) → 256비트 AES 키 (도메인 분리)
+    //   - GCM 태그(128비트)가 무결성+인증을 동시에 보장 → 별도 MAC 불필요
+    //   - nonce 12바이트는 SecureRandom → 동일 키 재사용 시에도 충돌 확률 2^-96
+
+    public static byte[] encrypt(byte[] plaintext, ECPoint recipientQ) throws Exception {
+        if (recipientQ == null || recipientQ.isInfinity() || !recipientQ.isValid())
+            throw new IllegalArgumentException("유효하지 않은 수신자 공개키");
+
+        KeyPair ephemeral = genKey();
+
+        // ECDH: S = r · Q  (r = 에페머럴 비밀키)
+        ECPoint S = recipientQ.multiply(ephemeral.privateKey()).normalize();
+        byte[] sharedX = enc(S.getXCoord().toBigInteger());
+        try {
+            byte[] encKey = tagHash("HASA-ECIES-ENC-V1", sharedX);
+            try {
+                byte[] nonce = new byte[12];
+                random.nextBytes(nonce);
+
+                Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding", "BC");
+                cipher.init(Cipher.ENCRYPT_MODE,
+                            new SecretKeySpec(encKey, "AES"),
+                            new GCMParameterSpec(128, nonce));
+                byte[] ct = cipher.doFinal(plaintext);
+
+                byte[] R_bytes = enc(ephemeral.Q);
+                byte[] output  = new byte[33 + 12 + ct.length];
+                System.arraycopy(R_bytes, 0, output,  0, 33);
+                System.arraycopy(nonce,   0, output, 33, 12);
+                System.arraycopy(ct,      0, output, 45, ct.length);
+                return output;
+            } finally {
+                Arrays.fill(encKey, (byte) 0);
+            }
+        } finally {
+            Arrays.fill(sharedX, (byte) 0);
+        }
+    }
+
+    public static byte[] decrypt(byte[] ciphertext, KeyPair kp) throws Exception {
+        if (ciphertext == null || ciphertext.length < 61)
+            throw new IllegalArgumentException(
+                "암호문 길이 오류: " + (ciphertext == null ? "null" : ciphertext.length) + " (최소 61바이트)");
+
+        byte[] R_bytes = Arrays.copyOf(ciphertext, 33);
+        byte[] nonce   = Arrays.copyOfRange(ciphertext, 33, 45);
+        byte[] ct      = Arrays.copyOfRange(ciphertext, 45, ciphertext.length);
+
+        ECPoint R = domain.getCurve().decodePoint(R_bytes).normalize();
+        if (R.isInfinity() || !R.isValid())
+            throw new IllegalArgumentException("유효하지 않은 에페머럴 공개키");
+
+        // ECDH: S = d · R  (d = 수신자 비밀키)
+        ECPoint S = R.multiply(kp.privateKey()).normalize();
+        byte[] sharedX = enc(S.getXCoord().toBigInteger());
+        try {
+            byte[] encKey = tagHash("HASA-ECIES-ENC-V1", sharedX);
+            try {
+                Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding", "BC");
+                cipher.init(Cipher.DECRYPT_MODE,
+                            new SecretKeySpec(encKey, "AES"),
+                            new GCMParameterSpec(128, nonce));
+                return cipher.doFinal(ct); // GCM 태그 검증 실패 시 AEADBadTagException
+            } finally {
+                Arrays.fill(encKey, (byte) 0);
+            }
+        } finally {
+            Arrays.fill(sharedX, (byte) 0);
         }
     }
 

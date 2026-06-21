@@ -42,6 +42,8 @@ public class Main {
                 case "2": runSign();     break;
                 case "3": runVerify();   break;
                 case "4": runSignfile(); break;
+                case "5": runEncrypt();  break;
+                case "6": runDecrypt();  break;
                 case "0": case "q": case "quit": case "exit":
                     System.out.println("종료합니다.");
                     return;
@@ -54,7 +56,7 @@ public class Main {
 
     static void printBanner() {
         System.out.println("╔══════════════════════════════════════╗");
-        System.out.println("║   HASA CLI - secp256k1 서명 도구     ║");
+        System.out.println("║  HASA CLI - secp256k1 서명/암호화   ║");
         System.out.println("╚══════════════════════════════════════╝");
         System.out.println();
     }
@@ -65,6 +67,8 @@ public class Main {
         System.out.println("  2. 메시지 서명");
         System.out.println("  3. 서명 검증");
         System.out.println("  4. 파일 서명");
+        System.out.println("  5. 암호화 (ECIES)");
+        System.out.println("  6. 복호화 (ECIES)");
         System.out.println("  0. 종료");
         System.out.println("─────────────────────────────────────");
     }
@@ -175,6 +179,73 @@ public class Main {
             System.out.println("[크기] " + content.length + " bytes");
             System.out.println("[저장] " + Path.of(outPath).toAbsolutePath());
             System.out.print(sigPem);
+        } catch (Exception e) {
+            System.out.println("[오류] " + e.getMessage());
+        }
+    }
+
+    // ── 5. 암호화 (HASA-ECIES) ──────────────────────────────────
+    static void runEncrypt() {
+        try {
+            String pubPem = promptPem("수신자 공개키 (파일 경로 또는 PEM 직접 입력): ", "HASA PUBLIC KEY");
+
+            System.out.print("입력 방식 - 메시지(m) / 파일(f): ");
+            String mode = readLine().trim().toLowerCase();
+
+            byte[] plaintext;
+            if (mode.equals("f")) {
+                System.out.print("파일 경로: ");
+                plaintext = Files.readAllBytes(Path.of(readLine().trim()));
+                System.out.println("[대상] 파일 (" + plaintext.length + " bytes)");
+            } else {
+                System.out.print("암호화할 메시지: ");
+                plaintext = readLine().getBytes(StandardCharsets.UTF_8);
+            }
+
+            System.out.print("저장 경로 (Enter = 화면 출력만): ");
+            String outPath = readLine().trim();
+
+            org.bouncycastle.math.ec.ECPoint Q = HASAPemCodec.decodePublicKey(pubPem);
+            byte[] ct     = HASA.encrypt(plaintext, Q);
+            String ctPem  = HASAPemCodec.encodeCiphertext(ct);
+
+            if (!outPath.isEmpty()) {
+                Files.writeString(Path.of(outPath), ctPem, StandardCharsets.UTF_8);
+                System.out.println("[저장] " + Path.of(outPath).toAbsolutePath());
+            }
+            System.out.println("[암호문]");
+            System.out.print(ctPem);
+        } catch (Exception e) {
+            System.out.println("[오류] " + e.getMessage());
+        }
+    }
+
+    // ── 6. 복호화 (HASA-ECIES) ──────────────────────────────────
+    static void runDecrypt() {
+        try {
+            String privPem = promptPem("비밀키 (파일 경로 또는 PEM 직접 입력): ", "HASA PRIVATE KEY");
+            String ctPem   = promptPem("암호문 (파일 경로 또는 PEM 직접 입력): ", "HASA CIPHERTEXT");
+
+            System.out.print("출력 방식 - 텍스트(t) / 파일(f): ");
+            String mode = readLine().trim().toLowerCase();
+
+            BigInteger d    = decodePrivateKey(privPem);
+            HASA.KeyPair kp = new HASA.KeyPair(d, HASA.G.multiply(d).normalize());
+            byte[] ct       = HASAPemCodec.decodeCiphertext(ctPem);
+            byte[] plain    = HASA.decrypt(ct, kp);
+
+            if (mode.equals("f")) {
+                System.out.print("저장할 파일 경로: ");
+                String outPath = readLine().trim();
+                Files.write(Path.of(outPath), plain);
+                System.out.println("[저장] " + Path.of(outPath).toAbsolutePath()
+                                 + " (" + plain.length + " bytes)");
+            } else {
+                System.out.println("[복호화 결과]");
+                System.out.println(new String(plain, StandardCharsets.UTF_8));
+            }
+        } catch (javax.crypto.AEADBadTagException e) {
+            System.out.println("[오류] GCM 태그 검증 실패 — 키가 틀리거나 암호문이 변조되었습니다.");
         } catch (Exception e) {
             System.out.println("[오류] " + e.getMessage());
         }

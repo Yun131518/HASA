@@ -10,6 +10,8 @@ public class HASAPemCodec {
     private static final String END_PUB   = "-----END HASA PUBLIC KEY-----\n";
     private static final String BEGIN_SIG = "-----BEGIN HASA SIGNATURE-----\n";
     private static final String END_SIG   = "-----END HASA SIGNATURE-----\n";
+    private static final String BEGIN_CT  = "-----BEGIN HASA CIPHERTEXT-----\n";
+    private static final String END_CT    = "-----END HASA CIPHERTEXT-----\n";
 
     // 1. 공개키(Q) -> PEM 문자열 추출 (네트워크 전송/파일 저장용)
     public static String encodePublicKey(ECPoint publicKey) {
@@ -58,6 +60,21 @@ public class HASAPemCodec {
         ECPoint r = HASA.domain.getCurve().decodePoint(rawR).normalize();
         BigInteger s = new BigInteger(1, rawS);
         return new HASA.Signature(r, s);
+    }
+
+    // 5. 암호문 바이트 -> PEM
+    public static String encodeCiphertext(byte[] ciphertext) {
+        return BEGIN_CT + formatLines(Base64.toBase64String(ciphertext)) + END_CT;
+    }
+
+    // 6. PEM -> 암호문 바이트
+    public static byte[] decodeCiphertext(String pem) {
+        String base64 = pem.replace(BEGIN_CT, "").replace(END_CT, "").replaceAll("\\s+", "");
+        byte[] raw = Base64.decode(base64);
+        if (raw.length < 61)
+            throw new IllegalArgumentException(
+                "암호문 데이터 길이 오류: " + raw.length + " 바이트 (최소 61바이트 필요)");
+        return raw;
     }
 
     private static String formatLines(String base64) {
