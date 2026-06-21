@@ -1,4 +1,4 @@
-<![CDATA[<div align="center">
+<div align="center">
 
 # ⚡ HASA
 
@@ -223,4 +223,3 @@ Claude helped design the CLI architecture, debug JAR packaging issues, and write
 ## 📄 License
 
 MIT — see [LICENSE](../LICENSE).
-]]>

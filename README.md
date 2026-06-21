@@ -1,4 +1,4 @@
-<![CDATA[<div align="center">
+<div align="center">
 
 # ⚡ HASA
 
@@ -53,4 +53,3 @@ Developed with the help of **[Claude](https://claude.ai)** by Anthropic.
 ## 📄 License
 
 MIT — see [LICENSE](LICENSE).
-]]>
